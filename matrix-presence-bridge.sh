@@ -50,7 +50,7 @@ while true; do
     fi
 
     # /sync mit set_presence (DAS hält Synapse-Presence am Leben!)
-    SYNC_URL="$HOMESERVER/_matrix/client/v3/sync?set_presence=${NEW_STATE}&timeout=0&filter={\"room\":{\"timeline\":{\"limit\":0}},\"presence\":{\"limit\":0}}"
+    SYNC_URL="${HOMESERVER}/_matrix/client/v3/sync?set_presence=${NEW_STATE}&timeout=0"
     if [[ -n "$SINCE" ]]; then
         SYNC_URL="${SYNC_URL}&since=${SINCE}"
     fi
