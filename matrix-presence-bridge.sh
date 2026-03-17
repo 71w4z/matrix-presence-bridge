@@ -1,6 +1,6 @@
 #!/bin/bash
-# matrix-presence-bridge.sh v4 — System-Idle → Matrix Presence
-# Läuft als System-Service, braucht keine User-Session
+# matrix-presence-bridge.sh v5 — System-Idle → Matrix Presence
+# Läuft als System-Service, findet X11-Session automatisch
 
 HOMESERVER="https://matrix.hoehn.de"
 IDLE_THRESHOLD_MS=420000  # 7 Minuten
@@ -13,7 +13,6 @@ if [[ ! -f "$CONF" ]]; then
     exit 1
 fi
 source "$CONF"
-# CONF muss TOKEN= enthalten
 
 if [[ -z "$TOKEN" ]]; then
     echo "ERROR: TOKEN not set in $CONF"
@@ -28,28 +27,38 @@ if [[ $? -ne 0 ]]; then
 fi
 USER_ID=$(echo "$WHOAMI" | grep -o '"user_id":"[^"]*"' | cut -d'"' -f4)
 
-echo "matrix-presence-bridge v4 started for $USER_ID (idle: $((IDLE_THRESHOLD_MS/1000))s, poll: ${POLL_INTERVAL}s)"
+echo "matrix-presence-bridge v5 started for $USER_ID (idle: $((IDLE_THRESHOLD_MS/1000))s, poll: ${POLL_INTERVAL}s)"
 
 LAST_STATE=""
 SINCE=""
 
-while true; do
-    # System-Idle: DISPLAY dynamisch finden falls nicht gesetzt
-    if [[ -z "$DISPLAY" ]]; then
-        # Display vom User's X-Session finden
-        FOUND_DISPLAY=$(who | grep "$USER" | grep -oP '\(:\d+\)' | head -1 | tr -d '()')
-        if [[ -n "$FOUND_DISPLAY" ]]; then
-            export DISPLAY="$FOUND_DISPLAY"
-            export XAUTHORITY="/home/$USER/.Xauthority"
+# X11 Display + Xauthority finden (openSUSE/KDE: Xauthority in /tmp/)
+find_x11() {
+    # Aus der Desktop-Session (plasmashell, kwin, Xorg) die Env-Vars holen
+    for proc in plasmashell kwin_x11 Xorg; do
+        PID=$(pgrep -u "$USER" "$proc" 2>/dev/null | head -1)
+        if [[ -n "$PID" ]]; then
+            FOUND_DISPLAY=$(cat /proc/$PID/environ 2>/dev/null | tr '\0' '\n' | grep '^DISPLAY=' | cut -d= -f2)
+            FOUND_XAUTH=$(cat /proc/$PID/environ 2>/dev/null | tr '\0' '\n' | grep '^XAUTHORITY=' | cut -d= -f2)
+            if [[ -n "$FOUND_DISPLAY" && -n "$FOUND_XAUTH" && -f "$FOUND_XAUTH" ]]; then
+                export DISPLAY="$FOUND_DISPLAY"
+                export XAUTHORITY="$FOUND_XAUTH"
+                return 0
+            fi
         fi
-    fi
+    done
+    return 1
+}
 
-    IDLE_MS=999999999
-    if [[ -n "$DISPLAY" ]] && command -v xprintidle &>/dev/null; then
+while true; do
+    # X11 finden (jede Runde, falls Session sich ändert)
+    if ! find_x11; then
+        # Kein Desktop → User nicht eingeloggt → unavailable
+        IDLE_MS=999999999
+    elif command -v xprintidle &>/dev/null; then
         IDLE_MS=$(xprintidle 2>/dev/null || echo 999999999)
-    elif command -v qdbus &>/dev/null; then
-        IDLE_S=$(qdbus org.kde.screensaver /ScreenSaver GetSessionIdleTime 2>/dev/null || echo 99999)
-        IDLE_MS=$((IDLE_S * 1000))
+    else
+        IDLE_MS=999999999
     fi
 
     if [[ "$IDLE_MS" -ge "$IDLE_THRESHOLD_MS" ]]; then
@@ -58,7 +67,7 @@ while true; do
         NEW_STATE="online"
     fi
 
-    # /sync mit set_presence (hält Synapse-Presence am Leben)
+    # /sync mit set_presence
     SYNC_URL="${HOMESERVER}/_matrix/client/v3/sync?set_presence=${NEW_STATE}&timeout=0"
     if [[ -n "$SINCE" ]]; then
         SYNC_URL="${SYNC_URL}&since=${SINCE}"
@@ -70,7 +79,7 @@ while true; do
             SINCE="$NEW_SINCE"
         fi
         if [[ "$NEW_STATE" != "$LAST_STATE" ]]; then
-            echo "$(date '+%H:%M:%S') $LAST_STATE → $NEW_STATE (idle: $((IDLE_MS/1000))s)"
+            echo "$(date '+%H:%M:%S') $LAST_STATE → $NEW_STATE (idle: $((IDLE_MS/1000))s, display=$DISPLAY)"
             LAST_STATE="$NEW_STATE"
         fi
     else
