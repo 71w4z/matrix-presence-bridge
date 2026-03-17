@@ -4,7 +4,7 @@
 
 HOMESERVER="https://matrix.hoehn.de"
 TOKEN_FILE="$HOME/.config/matrix-presence/token"
-IDLE_THRESHOLD_MS=300000  # 5 Minuten
+IDLE_THRESHOLD_MS=420000  # 7 Minuten
 POLL_INTERVAL=30
 
 # Token lesen
