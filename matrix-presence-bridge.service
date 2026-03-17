@@ -1,0 +1,14 @@
+[Unit]
+Description=Matrix Presence Bridge (System-Idle → Synapse)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/matrix-presence-bridge.sh
+Restart=always
+RestartSec=30
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=default.target
