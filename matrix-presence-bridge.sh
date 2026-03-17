@@ -1,46 +1,46 @@
 #!/bin/bash
-# matrix-presence-bridge.sh — System-Idle → Matrix Presence
-# Läuft als systemd user service auf MA-Rechnern (openSUSE/KDE)
-# Meldet System-Idle (Maus+Tastatur) direkt an Synapse
+# matrix-presence-bridge.sh v2 — System-Idle → Matrix Presence
+# Keine python3-Abhängigkeit!
 
 HOMESERVER="https://matrix.hoehn.de"
 TOKEN_FILE="$HOME/.config/matrix-presence/token"
-IDLE_THRESHOLD_MS=300000  # 5 Minuten in ms
-POLL_INTERVAL=30          # Alle 30 Sekunden prüfen
+IDLE_THRESHOLD_MS=300000  # 5 Minuten
+POLL_INTERVAL=30
 
 # Token lesen
 if [[ ! -f "$TOKEN_FILE" ]]; then
-    echo "ERROR: Token file not found: $TOKEN_FILE"
-    echo "Run: mkdir -p ~/.config/matrix-presence && echo 'YOUR_TOKEN' > $TOKEN_FILE"
+    echo "ERROR: Token not found: $TOKEN_FILE"
     exit 1
 fi
-TOKEN=$(cat "$TOKEN_FILE")
+TOKEN=$(cat "$TOKEN_FILE" | tr -d '[:space:]')
 
 # User-ID ermitteln
-USER_ID=$(curl -s -H "Authorization: Bearer $TOKEN" \
-    "$HOMESERVER/_matrix/client/v3/account/whoami" | \
-    python3 -c "import json,sys; print(json.load(sys.stdin)['user_id'])" 2>/dev/null)
-
-if [[ -z "$USER_ID" || "$USER_ID" == "None" ]]; then
-    echo "ERROR: Could not authenticate. Check token."
+WHOAMI=$(curl -sf -H "Authorization: Bearer $TOKEN" "$HOMESERVER/_matrix/client/v3/account/whoami")
+if [[ $? -ne 0 ]]; then
+    echo "ERROR: Auth failed. Check token."
     exit 1
 fi
+USER_ID=$(echo "$WHOAMI" | grep -o '"user_id":"[^"]*"' | cut -d'"' -f4)
+# URL-encode: @ → %40, : → %3A
+USER_ID_ENC=$(echo "$USER_ID" | sed 's/@/%40/g; s/:/%3A/g')
 
-echo "matrix-presence-bridge started for $USER_ID (idle threshold: $((IDLE_THRESHOLD_MS/1000))s)"
+echo "matrix-presence-bridge v2 started for $USER_ID (idle: $((IDLE_THRESHOLD_MS/1000))s, poll: ${POLL_INTERVAL}s)"
 
 LAST_STATE=""
+ERRORS=0
 
 while true; do
-    # System-Idle auslesen (ms seit letztem Input)
-    # xprintidle für X11/KDE, qdbus für Wayland/KDE
+    # System-Idle auslesen
+    IDLE_MS=0
     if command -v xprintidle &>/dev/null; then
         IDLE_MS=$(xprintidle 2>/dev/null || echo 0)
     elif command -v qdbus &>/dev/null; then
-        IDLE_MS=$(qdbus org.kde.screensaver /ScreenSaver GetSessionIdleTime 2>/dev/null || echo 0)
-        IDLE_MS=$((IDLE_MS * 1000))  # qdbus gibt Sekunden zurück
+        IDLE_S=$(qdbus org.kde.screensaver /ScreenSaver GetSessionIdleTime 2>/dev/null || echo 0)
+        IDLE_MS=$((IDLE_S * 1000))
     else
-        echo "ERROR: Neither xprintidle nor qdbus found. Install: sudo zypper install xprintidle"
-        exit 1
+        echo "ERROR: xprintidle not found. Install: sudo zypper install xprintidle"
+        sleep 60
+        continue
     fi
 
     # Status bestimmen
@@ -50,15 +50,32 @@ while true; do
         NEW_STATE="online"
     fi
 
-    # Nur bei Statuswechsel an Synapse melden (spart API-Calls)
-    if [[ "$NEW_STATE" != "$LAST_STATE" ]]; then
-        curl -s -X PUT \
+    # Nur bei Statuswechsel oder alle 5 Min refresh (keepalive)
+    NOW=$(date +%s)
+    FORCE_REFRESH=$(( (NOW % 300) < POLL_INTERVAL ? 1 : 0 ))
+
+    if [[ "$NEW_STATE" != "$LAST_STATE" ]] || [[ "$FORCE_REFRESH" -eq 1 && "$ERRORS" -eq 0 ]]; then
+        HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" -X PUT \
             -H "Authorization: Bearer $TOKEN" \
             -H "Content-Type: application/json" \
-            "$HOMESERVER/_matrix/client/v3/presence/$( python3 -c "import urllib.parse; print(urllib.parse.quote('$USER_ID'))" )/status" \
-            -d "{\"presence\": \"$NEW_STATE\"}" >/dev/null 2>&1
-        echo "$(date '+%H:%M:%S') $USER_ID: $LAST_STATE → $NEW_STATE (idle: $((IDLE_MS/1000))s)"
-        LAST_STATE="$NEW_STATE"
+            "$HOMESERVER/_matrix/client/v3/presence/$USER_ID_ENC/status" \
+            -d "{\"presence\": \"$NEW_STATE\"}")
+
+        if [[ "$HTTP_CODE" == "200" ]]; then
+            if [[ "$NEW_STATE" != "$LAST_STATE" ]]; then
+                echo "$(date '+%H:%M:%S') $LAST_STATE → $NEW_STATE (idle: $((IDLE_MS/1000))s)"
+            fi
+            LAST_STATE="$NEW_STATE"
+            ERRORS=0
+        else
+            ERRORS=$((ERRORS + 1))
+            echo "$(date '+%H:%M:%S') ERROR: HTTP $HTTP_CODE (attempt $ERRORS)"
+            if [[ "$ERRORS" -ge 10 ]]; then
+                echo "Too many errors, sleeping 5 min..."
+                sleep 300
+                ERRORS=0
+            fi
+        fi
     fi
 
     sleep "$POLL_INTERVAL"
