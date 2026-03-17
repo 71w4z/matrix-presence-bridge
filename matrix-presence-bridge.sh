@@ -34,16 +34,22 @@ LAST_STATE=""
 SINCE=""
 
 while true; do
-    # System-Idle: DISPLAY muss gesetzt sein für xprintidle
-    IDLE_MS=0
+    # System-Idle: DISPLAY dynamisch finden falls nicht gesetzt
+    if [[ -z "$DISPLAY" ]]; then
+        # Display vom User's X-Session finden
+        FOUND_DISPLAY=$(who | grep "$USER" | grep -oP '\(:\d+\)' | head -1 | tr -d '()')
+        if [[ -n "$FOUND_DISPLAY" ]]; then
+            export DISPLAY="$FOUND_DISPLAY"
+            export XAUTHORITY="/home/$USER/.Xauthority"
+        fi
+    fi
+
+    IDLE_MS=999999999
     if [[ -n "$DISPLAY" ]] && command -v xprintidle &>/dev/null; then
         IDLE_MS=$(xprintidle 2>/dev/null || echo 999999999)
     elif command -v qdbus &>/dev/null; then
         IDLE_S=$(qdbus org.kde.screensaver /ScreenSaver GetSessionIdleTime 2>/dev/null || echo 99999)
         IDLE_MS=$((IDLE_S * 1000))
-    else
-        # Kein X11 Zugriff → User nicht am Desktop → unavailable
-        IDLE_MS=999999999
     fi
 
     if [[ "$IDLE_MS" -ge "$IDLE_THRESHOLD_MS" ]]; then
