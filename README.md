@@ -1,52 +1,48 @@
 # Matrix Presence Bridge
 
-Zeigt den Online-Status in Element basierend auf der **Rechner-Aktivität** (Maus/Tastatur).
+System-Idle → Matrix Presence (Synapse). Zeigt ob jemand am Rechner sitzt.
 
 | Zustand | Element zeigt |
 |---------|--------------|
 | Rechner aktiv | 🟢 Online |
-| 5 Min keine Maus/Tastatur | 🟡 Abwesend |
-| Rechner aus / Service gestoppt | ⚫ Offline |
+| 7 Min idle | ⭕ Abwesend |
+| Rechner aus | ⚫ Offline |
 
-## Installation
+## Installation (als root)
 
 ```bash
 git clone https://github.com/71w4z/matrix-presence-bridge.git
 cd matrix-presence-bridge
-./install.sh DEIN_TOKEN
+./install-server.sh
 ```
 
-Token bekommst du von Marc oder Finn.
+## User hinzufügen
 
-## Voraussetzung
+```bash
+./add-user.sh paul TOKEN
+./add-user.sh sebastian TOKEN
+./add-user.sh agron TOKEN
+```
 
-- openSUSE / KDE (oder jedes Linux mit X11)
-- `xprintidle` (wird automatisch installiert)
+## Status prüfen
+
+```bash
+systemctl status matrix-presence-bridge@paul
+journalctl -u matrix-presence-bridge@paul -f
+```
 
 ## Update
 
 ```bash
 cd matrix-presence-bridge
 git pull
-cp matrix-presence-bridge.sh ~/.local/bin/
-systemctl --user restart matrix-presence-bridge.service
+cp matrix-presence-bridge.sh /opt/matrix-presence-bridge/
+systemctl restart matrix-presence-bridge@paul matrix-presence-bridge@sebastian matrix-presence-bridge@agron
 ```
 
-## Deinstallieren
+## User entfernen
 
 ```bash
-systemctl --user disable --now matrix-presence-bridge.service
-rm ~/.local/bin/matrix-presence-bridge.sh
-rm ~/.config/systemd/user/matrix-presence-bridge.service
-rm -rf ~/.config/matrix-presence
+systemctl disable --now matrix-presence-bridge@USERNAME
+rm /etc/matrix-presence-bridge/USERNAME.conf
 ```
-
-## Troubleshooting
-
-| Problem | Lösung |
-|---------|--------|
-| `xprintidle: not found` | `sudo zypper install xprintidle` |
-| `Could not authenticate` | Token prüfen: `cat ~/.config/matrix-presence/token` |
-| Service startet nicht nach Reboot | `loginctl enable-linger $USER` |
-| Status prüfen | `systemctl --user status matrix-presence-bridge` |
-| Logs | `journalctl --user -u matrix-presence-bridge -f` |

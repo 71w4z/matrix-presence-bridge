@@ -1,0 +1,16 @@
+[Unit]
+Description=Matrix Presence Bridge for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+ExecStart=/opt/matrix-presence-bridge/matrix-presence-bridge.sh
+Restart=always
+RestartSec=30
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/%i/.Xauthority
+
+[Install]
+WantedBy=multi-user.target
