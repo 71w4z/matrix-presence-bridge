@@ -3,8 +3,8 @@
 # v7: Robustere Element-Erkennung (electron + /usr/share/element)
 
 HOMESERVER="https://matrix.hoehn.de"
-IDLE_THRESHOLD_MS=420000  # 7 Minuten
-POLL_INTERVAL=30
+IDLE_THRESHOLD_MS=600000  # 7 Minuten
+POLL_INTERVAL=10
 
 CONF="/etc/matrix-presence-bridge/${USER}.conf"
 if [[ ! -f "$CONF" ]]; then
